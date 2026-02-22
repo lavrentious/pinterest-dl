@@ -62,7 +62,7 @@ It includes a [CLI](#-cli-usage) for direct usage and a [Python API](#️-python
 - ✅ **Playwright support** - faster and more reliable browser automation (default), with Selenium as fallback (`--backend selenium`).
 
 ## 🚩 Known Issues
-- 🔲 Not able to scrape nested boards yet.
+~~- 🔲 Not able to scrape nested boards yet.~~ (Supported since [#69](https://github.com/sean1832/pinterest-dl/pull/69))
 
 ## 📋 Requirements
 - Python 3.10 or newer
