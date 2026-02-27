@@ -67,6 +67,7 @@
 - （可选）Playwright 浏览器：`playwright install chromium` 或 `playwright install firefox`
 - （可选）Selenium 后端：Chrome 或 Firefox 浏览器及对应 WebDriver
 - （可选）[ffmpeg](https://ffmpeg.org/) 用于视频转封装为 MP4（`--video` 选项）。如果转封装失败，会自动回退到重新编码。使用 `--skip-remux` 可以下载原始 .ts 文件无需 ffmpeg。
+- （可选）用于将 `alt` 文本嵌入为元数据，需要 `pyexiv2` 库。安装命令：`pip install pyexiv2`。
 
 ## 📥 安装指南
 
