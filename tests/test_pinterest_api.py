@@ -17,11 +17,15 @@ class TestPinterestAPIUrlParsing:
         assert api.pin_id == "123456789012345"
 
     def test_parse_pin_id_without_trailing_slash(self):
-        """Test parsing pin ID - URL needs trailing slash."""
-        # Note: The API requires trailing slash, so this will be None
+        """Test parsing pin ID when URL omits trailing slash."""
         api = Api("https://www.pinterest.com/pin/987654321098765")
-        # Without trailing slash, it won't parse
-        assert api.pin_id is None
+        assert api.pin_id == "987654321098765"
+
+    def test_parse_pin_id_without_scheme(self):
+        """Test parsing pin ID when URL omits scheme."""
+        api = Api("ru.pinterest.com/pin/47358233572860931/")
+        assert api.url == "https://ru.pinterest.com/pin/47358233572860931/"
+        assert api.pin_id == "47358233572860931"
 
     def test_parse_board_url_valid(self):
         """Test parsing board URL."""
