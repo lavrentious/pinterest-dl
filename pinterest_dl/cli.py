@@ -1,9 +1,10 @@
 import argparse
+import json
 import sys
 from contextlib import nullcontext
 from getpass import getpass
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
 from pinterest_dl import PinterestDL, __description__, __version__
 from pinterest_dl.common import io
@@ -52,6 +53,24 @@ def sanitize_url(url: str) -> str:
     return url if url.endswith("/") else url + "/"
 
 
+def media_to_dict(media: PinterestMedia) -> dict[str, Any]:
+    """Serialize PinterestMedia, including local path when available."""
+    data = media.to_dict()
+    if media.local_path is not None:
+        data["local_path"] = str(media.local_path)
+    return data
+
+
+def media_list_to_dicts(items: List[PinterestMedia]) -> List[dict[str, Any]]:
+    """Serialize a list of PinterestMedia objects."""
+    return [media_to_dict(item) for item in items]
+
+
+def emit_json(payload: Any) -> None:
+    """Print machine-readable JSON to stdout."""
+    print(json.dumps(payload, indent=2))
+
+
 def validate_cookies_authenticated(cookies: list[dict]) -> bool:
     """Check if cookies contain authenticated Pinterest session.
 
@@ -68,7 +87,7 @@ def validate_cookies_authenticated(cookies: list[dict]) -> bool:
     return False
 
 
-def check_and_warn_invalid_cookies(cookies_path: str) -> None:
+def check_and_warn_invalid_cookies(cookies_path: str, quiet: bool = False) -> None:
     """Load and validate cookies file, warning user if authentication is invalid.
 
     Args:
@@ -85,6 +104,8 @@ def check_and_warn_invalid_cookies(cookies_path: str) -> None:
             )
             return
         if not validate_cookies_authenticated(cookies):
+            if quiet:
+                return
             print(f"\n[WARNING] Cookies in '{cookies_path}' are NOT authenticated!")
             print("The _auth cookie is set to 0, which means you're not logged in.")
             print("This will likely fail for private boards/pins.")
@@ -129,6 +150,7 @@ def get_parser() -> argparse.ArgumentParser:
     scrape_cmd.add_argument("--ensure-cap", action="store_true", help="Ensure every image has alt text")
     scrape_cmd.add_argument("--cap-from-title", action="store_true", help="Use the image title as the caption")
     scrape_cmd.add_argument("--dump", type=str, nargs="?", const=".dump", default=None, metavar="PATH", help="Dump API requests/responses to PATH directory (default: .dump if flag used without path, disabled if not specified)")
+    scrape_cmd.add_argument("--json", action="store_true", help="Print structured JSON to stdout")
 
     scrape_cmd.add_argument("--client", default="api", choices=["api", "chromium", "firefox"], help="Client to use for scraping. Browser clients are slower but more reliable.")
     scrape_cmd.add_argument("--backend", default="playwright", choices=["playwright", "selenium"], help="Browser backend for browser clients (default: playwright)")
@@ -153,6 +175,7 @@ def get_parser() -> argparse.ArgumentParser:
     search_cmd.add_argument("--ensure-cap", action="store_true", help="Ensure every image has alt text")
     search_cmd.add_argument("--cap-from-title", action="store_true", help="Use the image title as the caption")
     search_cmd.add_argument("--dump", type=str, nargs="?", const=".dump", default=None, metavar="PATH", help="Dump API requests/responses to PATH directory (default: .dump if flag used without path, disabled if not specified)")
+    search_cmd.add_argument("--json", action="store_true", help="Print structured JSON to stdout")
 
     search_cmd.add_argument("--client", default="api", choices=["api", "chromium", "firefox"], help="Client to use for scraping. Browser clients are slower but more reliable.")
     search_cmd.add_argument("--backend", default="playwright", choices=["playwright", "selenium"], help="Browser backend for browser clients (default: playwright)")
@@ -169,6 +192,7 @@ def get_parser() -> argparse.ArgumentParser:
     download_cmd.add_argument("--verbose", action="store_true", help="Print verbose output")
     download_cmd.add_argument("--caption", type=str, default="none", choices=["txt", "json", "metadata", "none"], help="Caption format for downloaded images: 'txt' for alt text in separate files, 'json' for full image data in seperate file, 'metadata' embeds in image files, 'none' skips captions (default)")
     download_cmd.add_argument("--ensure-cap", action="store_true", help="Ensure every image has alt text")
+    download_cmd.add_argument("--json", action="store_true", help="Print structured JSON to stdout")
 
     return parser
 # fmt: on
@@ -177,6 +201,7 @@ def get_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = get_parser()
     args = parser.parse_args()
+    json_mode = getattr(args, "json", False)
 
     # Setup logging early - verbose mode shows DEBUG, otherwise WARNING only
     setup_logging(verbose=getattr(args, "verbose", False))
@@ -253,16 +278,22 @@ def main() -> None:
         elif args.cmd == "scrape":
             urls = combine_inputs(args.urls, args.file)
             if not urls:
-                print("No URLs provided. Please provide at least one URL.")
+                if json_mode:
+                    emit_json({"command": "scrape", "results": []})
+                else:
+                    print("No URLs provided. Please provide at least one URL.")
                 return
 
             # Check cookies validity if provided
             if args.cookies:
-                check_and_warn_invalid_cookies(args.cookies)
+                check_and_warn_invalid_cookies(args.cookies, quiet=json_mode)
+
+            json_results: list[dict[str, Any]] = []
 
             for url in urls:
                 url = sanitize_url(url)
-                print(f"Scraping {url}...")
+                if not json_mode:
+                    print(f"Scraping {url}...")
                 if args.client in ["chromium", "firefox"]:
                     if args.backend == "selenium":
                         # Selenium backend (legacy)
@@ -271,7 +302,7 @@ def main() -> None:
 
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore", DeprecationWarning)
-                            imgs = (
+                            scraper = (
                                 PinterestDL.with_selenium(
                                     browser_type=browser_type,
                                     timeout=args.timeout,
@@ -280,8 +311,17 @@ def main() -> None:
                                     verbose=args.verbose,
                                     ensure_alt=args.ensure_cap,
                                 )
-                                .with_cookies_path(args.cookies)
-                                .scrape_and_download(
+                            )
+                            scraper = scraper.with_cookies_path(args.cookies)
+                            if json_mode and not args.output:
+                                imgs = scraper.scrape(
+                                    url,
+                                    args.num,
+                                )
+                                if args.cache:
+                                    io.write_json(media_list_to_dicts(imgs), args.cache, indent=4)
+                            else:
+                                imgs = scraper.scrape_and_download(
                                     url,
                                     args.output,
                                     args.num,
@@ -291,7 +331,6 @@ def main() -> None:
                                     cache_path=args.cache,
                                     caption=args.caption,
                                 )
-                            )
                     else:
                         # Playwright backend (default) - DISABLE images for scraping performance
                         scraper = PinterestDL.with_browser(
@@ -304,37 +343,59 @@ def main() -> None:
                             enable_images=False,  # Disable images for faster scraping
                         )
                         try:
-                            imgs = scraper.with_cookies_path(args.cookies).scrape_and_download(
-                                url,
-                                args.output,
-                                args.num,
-                                min_resolution=parse_resolution(args.resolution)
-                                if args.resolution
-                                else None,
-                                cache_path=args.cache,
-                                caption=args.caption,
-                            )
+                            scraper = scraper.with_cookies_path(args.cookies)
+                            if json_mode and not args.output:
+                                imgs = scraper.scrape(
+                                    url,
+                                    args.num,
+                                )
+                                if args.cache:
+                                    io.write_json(media_list_to_dicts(imgs), args.cache, indent=4)
+                            else:
+                                imgs = scraper.scrape_and_download(
+                                    url,
+                                    args.output,
+                                    args.num,
+                                    min_resolution=parse_resolution(args.resolution)
+                                    if args.resolution
+                                    else None,
+                                    cache_path=args.cache,
+                                    caption=args.caption,
+                                )
                         finally:
                             scraper.close()
-                    if imgs and len(imgs) != args.num:
+                    if not json_mode and imgs and len(imgs) != args.num:
                         print(
                             f"Warning: Only ({len(imgs)}) images were successfully downloaded from {url} (requested: {args.num}). Some may have been duplicates, filtered, or failed to download."
                         )
                 else:
-                    if args.incognito or args.headful:
+                    if (args.incognito or args.headful) and not json_mode:
                         print(
                             "Warning: Incognito and headful mode is only available for browser clients."
                         )
 
-                    imgs = (
+                    scraper = (
                         PinterestDL.with_api(
                             timeout=args.timeout,
                             verbose=args.verbose,
                             ensure_alt=args.ensure_cap,
                             dump=args.dump,
+                        ).with_cookies_path(args.cookies)
+                    )
+                    if json_mode and not args.output:
+                        imgs = scraper.scrape(
+                            url,
+                            args.num,
+                            min_resolution=parse_resolution(args.resolution)
+                            if args.resolution
+                            else (0, 0),
+                            delay=args.delay,
+                            caption_from_title=args.cap_from_title,
                         )
-                        .with_cookies_path(args.cookies)
-                        .scrape_and_download(
+                        if args.cache:
+                            io.write_json(media_list_to_dicts(imgs), args.cache, indent=4)
+                    else:
+                        imgs = scraper.scrape_and_download(
                             url,
                             args.output,
                             args.num,
@@ -348,44 +409,72 @@ def main() -> None:
                             delay=args.delay,
                             caption_from_title=args.cap_from_title,
                         )
-                    )
-                    if imgs and len(imgs) != args.num:
+                    if not json_mode and imgs and len(imgs) != args.num:
                         print(
                             f"Warning: Only ({len(imgs)}) images were successfully downloaded from {url} (requested: {args.num}). Some may have been duplicates, filtered, or failed to download."
                         )
+                if json_mode:
+                    json_results.append(
+                        {
+                            "input": url,
+                            "items": media_list_to_dicts(imgs or []),
+                        }
+                    )
 
-            print("\nDone.")
+            if json_mode:
+                emit_json({"command": "scrape", "results": json_results})
+            else:
+                print("\nDone.")
         elif args.cmd == "search":
             querys = combine_inputs(args.querys, args.file)
             if not querys:
-                print("No queries provided. Please provide at least one query.")
+                if json_mode:
+                    emit_json({"command": "search", "results": []})
+                else:
+                    print("No queries provided. Please provide at least one query.")
                 return
 
             # Check cookies validity if provided
             if args.cookies:
-                check_and_warn_invalid_cookies(args.cookies)
+                check_and_warn_invalid_cookies(args.cookies, quiet=json_mode)
+
+            json_results: list[dict[str, Any]] = []
 
             for query in querys:
-                print(f"Searching {query}...")
+                if not json_mode:
+                    print(f"Searching {query}...")
                 if args.client in ["chromium", "firefox"]:
                     raise NotImplementedError(
                         "Search is currently not available for browser clients."
                     )
                 else:
-                    if args.incognito or args.headful:
+                    if (args.incognito or args.headful) and not json_mode:
                         print(
                             "Warning: Incognito and headful mode is only available for browser clients."
                         )
 
-                    imgs = (
+                    scraper = (
                         PinterestDL.with_api(
                             timeout=args.timeout,
                             verbose=args.verbose,
                             ensure_alt=args.ensure_cap,
                             dump=args.dump,
+                        ).with_cookies_path(args.cookies)
+                    )
+                    if json_mode and not args.output:
+                        imgs = scraper.search(
+                            query,
+                            args.num,
+                            min_resolution=parse_resolution(args.resolution)
+                            if args.resolution
+                            else (0, 0),
+                            delay=args.delay,
+                            caption_from_title=args.cap_from_title,
                         )
-                        .with_cookies_path(args.cookies)
-                        .search_and_download(
+                        if args.cache:
+                            io.write_json(media_list_to_dicts(imgs), args.cache, indent=4)
+                    else:
+                        imgs = scraper.search_and_download(
                             query,
                             args.output,
                             args.num,
@@ -399,12 +488,21 @@ def main() -> None:
                             delay=args.delay,
                             caption_from_title=args.cap_from_title,
                         )
-                    )
-                    if imgs and len(imgs) != args.num:
+                    if not json_mode and imgs and len(imgs) != args.num:
                         print(
                             f"Warning: Only ({len(imgs)}) images were successfully downloaded from {query} (requested: {args.num}). Some may have been duplicates, filtered, or failed to download."
                         )
-            print("\nDone.")
+                if json_mode:
+                    json_results.append(
+                        {
+                            "input": query,
+                            "items": media_list_to_dicts(imgs or []),
+                        }
+                    )
+            if json_mode:
+                emit_json({"command": "search", "results": json_results})
+            else:
+                print("\nDone.")
         elif args.cmd == "download":
             # prepare image url data
             img_datas = io.read_json(args.input)
@@ -436,19 +534,29 @@ def main() -> None:
                 operations.add_captions_to_meta(kept, args.verbose)
             elif args.caption != "none":
                 raise ValueError("Invalid caption mode. Use 'txt', 'json', 'metadata', or 'none'.")
-            print("\nDone.")
+            if json_mode:
+                emit_json(
+                    {
+                        "command": "download",
+                        "input": args.input,
+                        "items": media_list_to_dicts(kept),
+                    }
+                )
+            else:
+                print("\nDone.")
         else:
             parser.print_help()
     except KeyboardInterrupt:
-        print("\nOperation cancelled by user.")
+        if not json_mode:
+            print("\nOperation cancelled by user.")
         sys.exit(1)
     except Exception as e:
         # Log with full traceback when verbose, show user-friendly message otherwise
         if getattr(args, "verbose", False):
             logger.error(f"An error occurred: {e}", exc_info=True)
         else:
-            print(f"\nError: {e}")
-            print("\nRun with --verbose for full traceback.")
+            print(f"\nError: {e}", file=sys.stderr)
+            print("\nRun with --verbose for full traceback.", file=sys.stderr)
         sys.exit(1)
 
 
