@@ -1,11 +1,16 @@
 """Tests for Pinterest API URL parsing."""
 
+from unittest.mock import patch
+
 from pinterest_dl.api.api import Api
+from pinterest_dl.domain.media import PinterestMedia
 from pinterest_dl.exceptions import (
+    EmptyResponseError,
     InvalidBoardUrlError,
     InvalidPinterestUrlError,
     InvalidSearchUrlError,
 )
+from pinterest_dl.scrapers.api_scraper import ApiScraper
 
 
 class TestPinterestAPIUrlParsing:
@@ -102,3 +107,47 @@ class TestPinterestAPIUrlParsing:
         api2 = Api("https://de.pinterest.com/user/board/section/")
         assert api2.is_section is True
         assert api2.section_slug == "section"
+
+
+class TestScrapeOneFallbacks:
+    def test_scrape_one_falls_back_to_page_when_api_data_is_invalid(self):
+        with patch.object(Api, "_get_default_cookies", return_value={}):
+            scraper = ApiScraper()
+            expected = PinterestMedia(
+                id=123456789012345,
+                src="https://i.pinimg.com/originals/test.jpg",
+                alt="caption",
+                origin="https://www.pinterest.com/pin/123456789012345/",
+                resolution=(1200, 1800),
+            )
+
+            with (
+                patch.object(Api, "get_main_image", side_effect=ValueError("bad json")),
+                patch.object(ApiScraper, "_get_main_pin_from_page", return_value=expected) as page_fallback,
+            ):
+                items = scraper.scrape_one("https://www.pinterest.com/pin/123456789012345/")
+
+        assert items == [expected]
+        page_fallback.assert_called_once()
+
+    def test_scrape_one_rejects_unknown_resolution_when_min_resolution_is_requested(self):
+        html = """
+        <html>
+            <meta property="og:image" content="https://i.pinimg.com/originals/test.jpg">
+            <meta property="og:description" content="caption">
+        </html>
+        """
+
+        with patch.object(Api, "_get_default_cookies", return_value={}):
+            scraper = ApiScraper()
+
+            with (
+                patch.object(Api, "get_main_image", side_effect=EmptyResponseError("no data")),
+                patch.object(Api, "get_pin_page", return_value=html),
+            ):
+                items = scraper.scrape_one(
+                    "https://www.pinterest.com/pin/123456789012345/",
+                    min_resolution=(1000, 1000),
+                )
+
+        assert items == []

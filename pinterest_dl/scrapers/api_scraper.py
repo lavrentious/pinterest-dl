@@ -478,7 +478,7 @@ class ApiScraper:
                 min_resolution,
                 caption_from_title=caption_from_title,
             )
-        except (ValueError, EmptyResponseError) as e:
+        except EmptyResponseError as e:
             logger.warning(f"Scraping interrupted: {e}")
             return None
         except Exception as e:
@@ -521,6 +521,8 @@ class ApiScraper:
             logger.debug(f"Pin API lookup failed, falling back to page HTML: {e}")
         except EmptyResponseError:
             logger.debug("Pin API lookup returned no pin data, falling back to page HTML")
+        except ValueError as e:
+            logger.debug(f"Pin API lookup returned invalid data, falling back to page HTML: {e}")
 
         return self._get_main_pin_from_page(
             api,
@@ -568,7 +570,11 @@ class ApiScraper:
         resolution = (width, height) if width and height else (0, 0)
 
         min_width, min_height = min_resolution
-        if resolution != (0, 0) and (width < min_width or height < min_height):
+        if (min_width > 0 or min_height > 0) and resolution == (0, 0):
+            raise EmptyResponseError(
+                "Requested pin does not include dimensions required for min_resolution."
+            )
+        if width < min_width or height < min_height:
             raise EmptyResponseError("Requested pin does not meet min_resolution.")
 
         description = meta.get("og:description") or meta.get("description") or ""
