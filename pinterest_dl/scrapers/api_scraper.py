@@ -108,7 +108,7 @@ class ApiScraper:
 
         Args:
             url (str): Pinterest URL to scrape. Supports:
-                - Pin URL: scrapes related pins
+                - Pin URL: scrapes the requested pin itself
                 - Board URL: scrapes pins from the board
                 - Section URL: scrapes pins from a specific board section
             num (int): Maximum number of images to scrape.
@@ -119,24 +119,16 @@ class ApiScraper:
             List[PinterestMedia]: List of scraped PinterestMedia objects.
         """
 
+        api = self._create_api(url)
         medias: List[PinterestMedia] = []
-        api = Api(
-            url,
-            self.cookies,
-            timeout=self.timeout,
-            dump=self.dump,
-        )
-        bookmarks = BookmarkManager(3)
 
         if api.is_pin:
-            medias = self._scrape_pins(
+            media = self._scrape_one_pin(
                 api,
-                num,
                 min_resolution,
-                delay,
-                bookmarks,
                 caption_from_title=caption_from_title,
             )
+            medias = [media] if media else []
         elif api.is_section:
             # Section URL detected - scrape only this section
             medias = self._scrape_section(
@@ -152,7 +144,7 @@ class ApiScraper:
                 num,
                 min_resolution,
                 delay,
-                bookmarks,
+                BookmarkManager(3),
                 caption_from_title=caption_from_title,
             )
 
@@ -160,6 +152,36 @@ class ApiScraper:
             self._display_images(medias)
 
         logger.info(f"Successfully scraped {len(medias[:num])} media items from {url}")
+        return medias[:num]
+
+    def related(
+        self,
+        url: str,
+        num: int,
+        min_resolution: Tuple[int, int] = (0, 0),
+        delay: float = 0.2,
+        caption_from_title: bool = False,
+    ) -> List[PinterestMedia]:
+        """Scrape related pins from a Pinterest pin URL."""
+        api = self._create_api(url)
+        if not api.is_pin:
+            raise ValueError("related only supports Pinterest pin URLs")
+
+        medias = self._scrape_pins(
+            api,
+            num,
+            min_resolution,
+            delay,
+            BookmarkManager(3),
+            caption_from_title=caption_from_title,
+        )
+
+        if self.verbose:
+            self._display_images(medias)
+
+        logger.info(
+            f"Successfully scraped {len(medias[:num])} related media items from {url}"
+        )
         return medias[:num]
 
     def scrape_and_download(
@@ -179,7 +201,7 @@ class ApiScraper:
 
         Args:
             url (str): Pinterest URL to scrape. Supports:
-                - Pin URL: scrapes related pins
+                - Pin URL: scrapes the requested pin itself
                 - Board URL: scrapes pins from the board
                 - Section URL: scrapes pins from a specific board section
             output_dir (Optional[Union[str, Path]]): Directory to store downloaded images. 'None' print to console.
@@ -210,6 +232,31 @@ class ApiScraper:
             scraped_outputs, output_dir, download_streams, skip_remux, cache_path, caption
         )
 
+    def related_and_download(
+        self,
+        url: str,
+        output_dir: Optional[Union[str, Path]],
+        num: int,
+        download_streams: bool = False,
+        skip_remux: bool = False,
+        min_resolution: Tuple[int, int] = (0, 0),
+        cache_path: Optional[Union[str, Path]] = None,
+        caption: Literal["txt", "json", "metadata", "none"] = "none",
+        caption_from_title: bool = False,
+        delay: float = 0.2,
+    ) -> Optional[List[PinterestMedia]]:
+        """Scrape related pins from a pin URL and download them."""
+        scraped_outputs = self.related(
+            url,
+            num,
+            min_resolution,
+            delay,
+            caption_from_title=caption_from_title,
+        )
+        return self._download_and_save(
+            scraped_outputs, output_dir, download_streams, skip_remux, cache_path, caption
+        )
+
     def scrape_one(
         self,
         url: str,
@@ -217,12 +264,7 @@ class ApiScraper:
         caption_from_title: bool = False,
     ) -> List[PinterestMedia]:
         """Scrape exactly one requested pin from a pin URL."""
-        api = Api(
-            url,
-            self.cookies,
-            timeout=self.timeout,
-            dump=self.dump,
-        )
+        api = self._create_api(url)
 
         if not api.is_pin:
             raise ValueError("scrape_one only supports Pinterest pin URLs")
@@ -484,6 +526,14 @@ class ApiScraper:
         except Exception as e:
             logger.error(f"Unexpected error while scraping pin: {e}", exc_info=self.verbose)
             raise
+
+    def _create_api(self, url: str) -> Api:
+        return Api(
+            url,
+            self.cookies,
+            timeout=self.timeout,
+            dump=self.dump,
+        )
 
     def _get_main_pin(
         self,

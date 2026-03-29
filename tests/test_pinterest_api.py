@@ -1,5 +1,6 @@
 """Tests for Pinterest API URL parsing."""
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from pinterest_dl.api.api import Api
@@ -151,3 +152,64 @@ class TestScrapeOneFallbacks:
                 )
 
         assert items == []
+
+
+class TestApiScraperRouting:
+    def test_scrape_fetches_requested_pin_for_pin_urls(self):
+        fake_api = SimpleNamespace(is_pin=True, is_section=False)
+        expected = PinterestMedia(
+            id=123,
+            src="https://i.pinimg.com/originals/test.jpg",
+            alt="caption",
+            origin="https://www.pinterest.com/pin/123/",
+            resolution=(1200, 1800),
+        )
+
+        with (
+            patch("pinterest_dl.scrapers.api_scraper.Api", return_value=fake_api),
+            patch.object(ApiScraper, "_scrape_one_pin", return_value=expected) as scrape_one_pin,
+        ):
+            scraper = ApiScraper()
+            items = scraper.scrape("https://www.pinterest.com/pin/123/", num=50)
+
+        assert items == [expected]
+        scrape_one_pin.assert_called_once_with(
+            fake_api,
+            (0, 0),
+            caption_from_title=False,
+        )
+
+    def test_scrape_uses_board_flow_for_board_urls(self):
+        fake_api = SimpleNamespace(is_pin=False, is_section=False)
+        expected = [
+            PinterestMedia(
+                id=1,
+                src="https://i.pinimg.com/originals/test.jpg",
+                alt="caption",
+                origin="https://www.pinterest.com/pin/1/",
+                resolution=(1200, 1800),
+            )
+        ]
+
+        with (
+            patch("pinterest_dl.scrapers.api_scraper.Api", return_value=fake_api),
+            patch.object(ApiScraper, "_scrape_board", return_value=expected) as scrape_board,
+        ):
+            scraper = ApiScraper()
+            items = scraper.scrape("https://www.pinterest.com/user/board/", num=50)
+
+        assert items == expected
+        scrape_board.assert_called_once()
+
+    def test_related_requires_pin_urls(self):
+        fake_api = SimpleNamespace(is_pin=False, is_section=False)
+
+        with patch("pinterest_dl.scrapers.api_scraper.Api", return_value=fake_api):
+            scraper = ApiScraper()
+
+            try:
+                scraper.related("https://www.pinterest.com/user/board/", num=10)
+            except ValueError as e:
+                assert str(e) == "related only supports Pinterest pin URLs"
+            else:
+                raise AssertionError("Expected ValueError for non-pin related scrape")
