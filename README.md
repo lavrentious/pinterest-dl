@@ -125,11 +125,14 @@ Scrape images from Pinterest using the command line:
 # Scrape from a Pinterest board or pin
 pinterest-dl scrape <url> -o output_folder -n 50
 
+# Download exactly one pin
+pinterest-dl one <pin_url> -o output_folder
+
 # Download videos as MP4 (requires ffmpeg)
-pinterest-dl scrape <url> --video -o output_folder
+pinterest-dl one <pin_url> --video -o output_folder
 
 # Download videos as raw .ts files (no ffmpeg needed)
-pinterest-dl scrape <url> --video --skip-remux -o output_folder
+pinterest-dl one <pin_url> --video --skip-remux -o output_folder
 
 # Search for images
 pinterest-dl search "nature photography" -o output_folder -n 30
@@ -140,7 +143,7 @@ pinterest-dl login -o cookies.json
 
 **📖 [View Full CLI Documentation ->](https://github.com/sean1832/pinterest-dl/blob/main/doc/CLI.md)**
 
-Available commands: `login`, `scrape`, `search`, `download`
+Available commands: `login`, `scrape`, `one`, `search`, `download`
 
 ---
 

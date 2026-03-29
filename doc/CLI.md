@@ -9,8 +9,9 @@ pinterest-dl [command] [options]
 | ------------------------- | ---------------------------------------------------------------------------------- |
 | [`login`](#1-login)       | Login to Pinterest to obtain browser cookies for scraping private boards and pins. |
 | [`scrape`](#2-scrape)     | Scrape images from a Pinterest URL.                                                |
-| [`search`](#3-search)     | Search for images on Pinterest using a query.                                      |
-| [`download`](#4-download) | Download images from a list of URLs provided in a JSON file.                       |
+| [`one`](#3-one)           | Download exactly one Pinterest pin.                                                |
+| [`search`](#4-search)     | Search for images on Pinterest using a query.                                      |
+| [`download`](#5-download) | Download images from a list of URLs provided in a JSON file.                       |
 
 
 ---
@@ -82,7 +83,39 @@ cat urls.txt | pinterest-dl scrape -f - [options]
 
 ---
 
-### 3. Search  
+### 3. One
+Download exactly one Pinterest pin.
+
+```bash
+pinterest-dl one <pin_url> [options]
+
+# Aliases:
+pinterest-dl scrape_one <pin_url> [options]
+pinterest-dl scrape-one <pin_url> [options]
+```
+
+| Options                              | Description                                               | Default        |
+| ------------------------------------ | --------------------------------------------------------- | -------------- |
+| `<pin_url>`                          | Pinterest pin URL                                         | -              |
+| `-o`, `--output [directory]`         | Directory to save media (stdout if omitted)               | -              |
+| `-c`, `--cookies [file]`             | Path to cookies file (for private content)                | `cookies.json` |
+| `-r`, `--resolution [WxH]`           | Minimum image resolution                                  | -              |
+| `--video`                            | Download video stream (if available)                      | -              |
+| `--skip-remux` (**NEW**)             | Skip ffmpeg remux, output raw .ts file (no ffmpeg needed) | -              |
+| `--timeout [seconds]`                | Request timeout                                           | `10`           |
+| `--cache [path]`                     | Save scraped URLs to JSON                                 | -              |
+| `--caption [txt/json/metadata/none]` | Caption format                                            | `none`         |
+| `--ensure-cap`                       | Require alt text on the pin                               | -              |
+| `--cap-from-title`                   | Use image title as caption                                | -              |
+| `--dump [PATH]` (**NEW**)            | Dump API requests/responses to PATH (default: `.dump`)    | -              |
+| `--verbose`                          | Enable debug output                                       | -              |
+
+> [!TIP]
+> Use `one` when you want the exact requested pin. Use `scrape` on a pin URL to fetch related pins.
+
+---
+
+### 4. Search  
 Find and download images via a search query (API mode only), or from URL-lists in files.
 
 ```bash
@@ -120,7 +153,7 @@ cat queries.txt | pinterest-dl search -f - [options]
 
 ---
 
-### 4. Download  
+### 5. Download  
 Fetch images from a previously saved cache file.
 
 ```bash
