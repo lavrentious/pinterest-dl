@@ -544,13 +544,21 @@ class Api:
         Returns:
             result (str, str): (username, boardname)
         """
-        result = re.search(
-            r"https://(?:[a-z0-9-]+\.)?pinterest\.com/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)/?$",
-            url,
-        )
-        if not result:
+        parsed = urlsplit(url)
+        if not re.fullmatch(r"(?:[a-z0-9-]+\.)?pinterest\.com", parsed.netloc, flags=re.IGNORECASE):
             raise InvalidBoardUrlError(f"Invalid Pinterest board URL: {url}")
-        return result.group(1), result.group(2)
+
+        segments = [segment for segment in parsed.path.split("/") if segment]
+        if len(segments) != 2:
+            raise InvalidBoardUrlError(f"Invalid Pinterest board URL: {url}")
+
+        username, boardname = segments
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", username) or not re.fullmatch(
+            r"[A-Za-z0-9_-]+", boardname
+        ):
+            raise InvalidBoardUrlError(f"Invalid Pinterest board URL: {url}")
+
+        return username, boardname
 
     @staticmethod
     def _parse_section_url(url: str) -> Tuple[str, str, str]:
@@ -562,10 +570,21 @@ class Api:
         Returns:
             result (str, str, str): (username, boardname, section_slug)
         """
-        result = re.search(
-            r"https://(?:[a-z0-9-]+\.)?pinterest\.com/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)/?$",
-            url,
-        )
-        if not result:
+        parsed = urlsplit(url)
+        if not re.fullmatch(r"(?:[a-z0-9-]+\.)?pinterest\.com", parsed.netloc, flags=re.IGNORECASE):
             raise InvalidSectionUrlError(f"Invalid Pinterest section URL: {url}")
-        return result.group(1), result.group(2), result.group(3)
+
+        segments = [segment for segment in parsed.path.split("/") if segment]
+        if len(segments) != 3:
+            raise InvalidSectionUrlError(f"Invalid Pinterest section URL: {url}")
+
+        username, boardname, section_slug = segments
+        valid_segment = re.compile(r"[A-Za-z0-9_-]+$")
+        if not (
+            valid_segment.fullmatch(username)
+            and valid_segment.fullmatch(boardname)
+            and valid_segment.fullmatch(section_slug)
+        ):
+            raise InvalidSectionUrlError(f"Invalid Pinterest section URL: {url}")
+
+        return username, boardname, section_slug
